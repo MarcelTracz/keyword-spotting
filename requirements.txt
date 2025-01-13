@@ -1,0 +1,9 @@
+streamlit
+pyaudio
+matplotlib
+torch
+scipy
+torchvision
+kagglehub
+torchsummary
+scikit-learn

@@ -146,7 +146,9 @@ while stream.is_active():
         outputs = model(data_tensor)
         predictions = torch.argmax(outputs, dim=1)
 
-    placeholder_label.write(CLASSES[predictions])
+    if outputs.max() > 0.85:
+       placeholder_label.write(CLASSES[predictions])
+
     plot_spectrogram(data, placeholder_spectrogram)
     plot_amplitude(data, placeholder_amplitude)
 

@@ -7,3 +7,4 @@ torchvision
 kagglehub
 torchsummary
 scikit-learn
+pydub

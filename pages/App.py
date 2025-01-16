@@ -9,12 +9,13 @@ from PIL import Image
 from io import BytesIO
 from scipy import signal
 from torchvision import transforms
+from scipy.ndimage import median_filter, gaussian_filter
 
 
 CLASSES = ["go", "stop", "bed", "other"]
 SAMPLE_RATE = 16000
 CHUNK_SIZE = 16000
-MAX_AMPL = 8000
+MAX_AMPL = 1
 MAX_FREQ = 4000
 
 
@@ -37,7 +38,7 @@ def plot_amplitude(data, placeholder):
     ax.plot(np.abs(data))
     ax.set_title("Amplitude Plot")
     ax.set_xlabel("Time [s]")
-    ax.set_ylabel("Amplitude")
+    ax.set_ylabel("Amplitude [%]")
     ax.set_ylim(0, MAX_AMPL)
     ax.grid()
 
@@ -49,30 +50,22 @@ class ConvNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv1 = nn.Conv2d(3, 64, kernel_size=(3, 3), padding=(1, 1))
-        self.batch1 = nn.BatchNorm2d(
-            64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True
-        )
+        self.batch1 = nn.BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
         self.act1 = nn.GELU()
         self.pool1 = nn.MaxPool2d(kernel_size=(2, 2))
 
         self.conv2 = nn.Conv2d(64, 128, kernel_size=(3, 3), padding=(1, 1))
-        self.batch2 = nn.BatchNorm2d(
-            128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True
-        )
+        self.batch2 = nn.BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
         self.act2 = nn.GELU()
         self.pool2 = nn.MaxPool2d(kernel_size=(2, 2))
 
         self.conv3 = nn.Conv2d(128, 256, kernel_size=(3, 3), padding=(1, 1))
-        self.batch3 = nn.BatchNorm2d(
-            256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True
-        )
+        self.batch3 = nn.BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
         self.act3 = nn.GELU()
         self.pool3 = nn.MaxPool2d(kernel_size=(2, 2))
 
         self.conv4 = nn.Conv2d(256, 512, kernel_size=(3, 3), padding=(1, 1))
-        self.batch4 = nn.BatchNorm2d(
-            512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True
-        )
+        self.batch4 = nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
         self.act4 = nn.GELU()
         self.pool4 = nn.MaxPool2d(kernel_size=(2, 2))
 
@@ -86,6 +79,7 @@ class ConvNet(nn.Module):
 
         self.fc7 = nn.Linear(512, 4)
         self.act7 = nn.Softmax(dim=1)
+
 
     def forward(self, x):
         x = self.act1(self.conv1(x))
@@ -137,11 +131,16 @@ placeholder_amplitude = st.empty()
 
 while stream.is_active():
     data = np.frombuffer(
-        stream.read(CHUNK_SIZE, exception_on_overflow=False), dtype=np.int16
+        stream.read(CHUNK_SIZE,
+        exception_on_overflow=False),
+        dtype=np.int16
     )
 
+    data = data / np.max(np.abs(data))
     frequencies, times, Sxx = signal.spectrogram(data, fs=SAMPLE_RATE)
     Sxx = np.clip(Sxx, 1e-10, None)
+    Sxx = median_filter(Sxx, size=(5, 5))
+    Sxx = gaussian_filter(Sxx, sigma=1)
     fig, ax = plt.subplots(figsize=(1, 1), dpi=64)
     ax.pcolormesh(times, frequencies, 10 * np.log10(Sxx), shading="auto")
     ax.axis("off")
@@ -149,6 +148,7 @@ while stream.is_active():
     buf = BytesIO()
     plt.savefig(buf, format="png", bbox_inches="tight", pad_inches=0)
     buf.seek(0)
+    plt.close(fig)
     img = Image.open(buf).convert("RGB")
     buf.close()
     data_tensor = transform(img).unsqueeze(0)
@@ -156,11 +156,14 @@ while stream.is_active():
     with torch.no_grad():
         outputs = model(data_tensor)
         predictions = torch.argmax(outputs, dim=1)
-        print(outputs)
-        print(predictions)
+
+    lbl = CLASSES[predictions]
     
-    if outputs.max() > 0.85:
+    if outputs.max() > 0.9 and lbl != "other":
         placeholder_label.write(CLASSES[predictions])
+    
+    else:
+        placeholder_label.write(" ")
     
     plot_spectrogram(data, placeholder_spectrogram)
     plot_amplitude(data, placeholder_amplitude)
